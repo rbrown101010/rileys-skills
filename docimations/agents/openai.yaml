@@ -1,0 +1,4 @@
+interface:
+  display_name: "Docimations"
+  short_description: "Animated SVG-to-GIF charts for docs"
+  default_prompt: "Use $docimations to create animated flowchart GIFs and place them in a Google Doc."
