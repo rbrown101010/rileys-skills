@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mobile App"
+  short_description: "Build, preview, deploy, or install mobile apps"
+  default_prompt: "Use $mobile-app to build a mobile app, preview it, and give me the URL or install link."

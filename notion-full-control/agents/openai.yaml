@@ -1,0 +1,3 @@
+display_name: Notion Full Control
+short_description: Direct Notion API access through a local CLI with Keychain-backed auth and raw endpoint fallback.
+default_prompt: Use the local Notion CLI skill to search, inspect, query, create, update, and append content in Notion when the connector is unavailable.

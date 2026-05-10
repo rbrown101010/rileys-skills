@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <title>__APP_NAME__</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script>
+      (async () => {
+        const files = [
+          "./iOS.jsx",
+          "./data.jsx",
+          "./primitives.jsx",
+          "./screens.jsx",
+          "./app.jsx",
+        ];
+
+        try {
+          for (const file of files) {
+            const response = await fetch(file);
+            if (!response.ok) {
+              throw new Error(`Failed to load ${file}: ${response.status}`);
+            }
+            const source = await response.text();
+            const compiled = Babel.transform(source, {
+              presets: ["env", "react"],
+              sourceMaps: "inline",
+            }).code;
+            window.eval(`${compiled}\n//# sourceURL=${file}`);
+          }
+        } catch (error) {
+          console.error(error);
+          document.body.dataset.loadError = String(error.message || error);
+        }
+      })();
+    </script>
+  </body>
+</html>

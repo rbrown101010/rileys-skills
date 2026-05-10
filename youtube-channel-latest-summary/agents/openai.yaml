@@ -1,0 +1,4 @@
+interface:
+  display_name: "YouTube Channel Brief"
+  short_description: "Summarize recent YouTube channel uploads"
+  default_prompt: "Use $youtube-channel-latest-summary to summarize the latest 10 videos from a YouTube channel."

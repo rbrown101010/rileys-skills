@@ -1,0 +1,4 @@
+interface:
+  display_name: "Buffer Publisher"
+  short_description: "Draft, schedule, and inspect Buffer posts"
+  default_prompt: "Use $buffer-publisher to list my Buffer channels and prepare a draft post."

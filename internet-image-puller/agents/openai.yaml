@@ -1,0 +1,4 @@
+interface:
+  display_name: "Internet Image Puller"
+  short_description: "Search sites and save internet images"
+  default_prompt: "Use $internet-image-puller to search Google Images with SerpAPI or extract site images with Firecrawl and save them into a local folder."

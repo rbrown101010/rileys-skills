@@ -1,0 +1,3 @@
+display_name: /todo
+short_description: Update Riley's shared todo document.
+default_prompt: "Use /todo to update Riley's shared todo list document for this project."

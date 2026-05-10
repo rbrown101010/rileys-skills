@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 outputs/
 tmp/
+ios-cli-linux-x64

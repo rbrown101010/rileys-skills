@@ -1,0 +1,3 @@
+display_name: Write Notebook
+short_description: Write directly to Riley's Neon-backed notebook.
+default_prompt: "Use the write-notebook skill to save this into Riley's notebook."

@@ -1,0 +1,5 @@
+version: "1.0"
+openai:
+  display_name: "Paper MCP"
+  short_description: "Direct Paper board editing via local MCP"
+  default_prompt: "Use $paper-mcp to inspect and edit the open Paper board through the local Paper MCP server."

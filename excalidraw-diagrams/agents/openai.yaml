@@ -1,0 +1,4 @@
+interface:
+  display_name: "Excalidraw Diagrams"
+  short_description: "Build polished Excalidraw diagrams"
+  default_prompt: "Use $excalidraw-diagrams to turn this description into a styled Excalidraw diagram and export a shareable URL when useful."

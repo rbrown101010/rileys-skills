@@ -1,0 +1,4 @@
+interface:
+  display_name: "Video Analysis"
+  short_description: "Analyze local videos with Gemini"
+  default_prompt: "Use $video-analysis to analyze a local video with Gemini and return transcript, summary, and key visuals."

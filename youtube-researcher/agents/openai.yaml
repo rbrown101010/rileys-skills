@@ -1,0 +1,4 @@
+interface:
+  display_name: "YouTube Researcher"
+  short_description: "YouTube niche and transcript research"
+  default_prompt: "Use $youtube-researcher to find relevant YouTube videos, inspect channels, and pull transcripts fast."

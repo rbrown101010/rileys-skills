@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Vibecode iOS Config",
+  "description": "Local state for the build-ios-apps skill. Stored at ~/.vibecode/ios/config.json",
+  "type": "object",
+  "properties": {
+    "activeUser": {
+      "type": "string",
+      "description": "Vibecode user ID (e.g. user_abc123) of the currently active Apple Developer account"
+    },
+    "users": {
+      "type": "object",
+      "description": "Map of userId -> user account info + projects",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "appleId": {
+            "type": "string",
+            "description": "Apple ID email used to authenticate"
+          },
+          "teamId": {
+            "type": "string",
+            "description": "Apple Developer team ID"
+          },
+          "teamName": {
+            "type": "string",
+            "description": "Apple Developer team display name"
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "App display name"
+                },
+                "bundleId": {
+                  "type": "string",
+                  "description": "iOS bundle identifier (e.g. com.example.myapp)"
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Local path to the Xcode project"
+                },
+                "lastBuildJobId": {
+                  "type": "string",
+                  "description": "Most recent build job ID from /api/build"
+                },
+                "lastBuildAppUrl": {
+                  "type": "string",
+                  "description": "URL of the last built .app archive on R2"
+                },
+                "lastSignedBuildId": {
+                  "type": "string",
+                  "description": "Most recent signed build ID from /api/sign"
+                },
+                "lastInstallUrl": {
+                  "type": "string",
+                  "description": "OTA install URL for the last signed build"
+                }
+              },
+              "required": ["name", "bundleId", "path"]
+            }
+          }
+        },
+        "required": ["appleId", "teamId", "teamName"]
+      }
+    }
+  },
+  "required": ["activeUser", "users"]
+}

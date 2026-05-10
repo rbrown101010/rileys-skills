@@ -1,0 +1,4 @@
+interface:
+  display_name: "Readwise CLI Control"
+  short_description: "Headless Readwise and Reader control"
+  default_prompt: "Use $readwise-cli-control to search or manage my Readwise and Reader library without browser auth."

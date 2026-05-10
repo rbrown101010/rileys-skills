@@ -1,0 +1,4 @@
+interface:
+  display_name: "Firebase CLI"
+  short_description: "Firebase CLI setup and database workflows"
+  default_prompt: "Use $firebase-cli to configure Firebase CLI access, create a database, or query Realtime Database safely."

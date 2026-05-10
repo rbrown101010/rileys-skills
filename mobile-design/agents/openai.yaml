@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mobile Design"
+  short_description: "Build a clickable mobile prototype locally"
+  default_prompt: "Use $mobile-design to design a clickable mobile app flow and launch a local browser preview I can click through."

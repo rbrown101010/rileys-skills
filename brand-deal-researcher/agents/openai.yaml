@@ -1,0 +1,4 @@
+interface:
+  display_name: "Brand Deal Researcher"
+  short_description: "Find and research sponsorship email leads"
+  default_prompt: "Use $brand-deal-researcher to scan recent Gmail for paid promotion offers, research each brand, and create a prioritized table or spreadsheet."

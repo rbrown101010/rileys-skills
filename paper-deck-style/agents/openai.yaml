@@ -1,0 +1,4 @@
+interface:
+  display_name: "Paper Deck Style"
+  short_description: "Minimal high-end Paper slide deck style"
+  default_prompt: "Use $paper-deck-style to design or extend a minimal high-end slide deck on Paper."

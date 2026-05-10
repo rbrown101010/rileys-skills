@@ -1,0 +1,4 @@
+interface:
+  display_name: "Remove Image Background"
+  short_description: "Cut out image backgrounds"
+  default_prompt: "Use $remove-image-background to remove the background from a local image file or image URL and save a transparent output."

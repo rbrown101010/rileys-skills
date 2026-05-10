@@ -1,0 +1,4 @@
+interface:
+  display_name: "Remotion HTML-in-canvas"
+  short_description: "Create Remotion canvas effects."
+  default_prompt: "Create a Remotion composition using <HtmlInCanvas> for a vintage screen effect."

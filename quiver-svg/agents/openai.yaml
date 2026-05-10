@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quiver SVG"
+  short_description: "Generate and vectorize SVGs with QuiverAI"
+  default_prompt: "Use $quiver-svg to generate a clean SVG icon from this prompt."

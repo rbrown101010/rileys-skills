@@ -1,0 +1,469 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import ssl
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+
+DEFAULT_SERVICE_URL = "https://ios-service.vibecodeapp.com"
+CONFIG_PATH = Path.home() / ".vibecode" / "ios" / "config.json"
+SKILL_DIR = Path(__file__).resolve().parent
+SKILL_MD = SKILL_DIR / "SKILL.md"
+BOOTSTRAP_SCRIPT = SKILL_DIR / "scripts" / "bootstrap.sh"
+
+
+class CliError(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def load_config():
+    if not CONFIG_PATH.exists():
+        return {}
+    try:
+        return json.loads(CONFIG_PATH.read_text())
+    except json.JSONDecodeError as exc:
+        raise CliError("UNEXPECTED_ERROR", f"Invalid config JSON: {exc}") from exc
+
+
+def save_config(config):
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(config, indent=2) + "\n")
+
+
+def get_config_value(config, key):
+    current = config
+    for part in key.split("."):
+        if not isinstance(current, dict) or part not in current:
+            raise CliError("NOT_FOUND", f"Config key not found: {key}")
+        current = current[part]
+    return current
+
+
+def set_config_value(config, key, value):
+    current = config
+    parts = key.split(".")
+    for part in parts[:-1]:
+        current = current.setdefault(part, {})
+        if not isinstance(current, dict):
+            raise CliError("CLIENT_ERROR", f"Cannot set nested key below non-object: {key}")
+    current[parts[-1]] = value
+    return config
+
+
+def service_url():
+    return os.environ.get("SIGNING_SERVICE_URL", DEFAULT_SERVICE_URL).rstrip("/")
+
+
+def api_key():
+    token = os.environ.get("VIBECODE_API_KEY")
+    if not token:
+        raise CliError("MISSING_ENV", "VIBECODE_API_KEY is not set")
+    return token
+
+
+def default_user_id():
+    if os.environ.get("VIBECODE_USER_ID"):
+        return os.environ["VIBECODE_USER_ID"]
+    config = load_config()
+    active_user = config.get("activeUser")
+    if active_user:
+        return active_user
+    raise CliError("MISSING_USER_ID", "No active user found; set VIBECODE_USER_ID or authenticate first")
+
+
+def make_request(method, path, *, body=None, headers=None, auth=True, timeout=60):
+    request_headers = {"Accept": "application/json"}
+    if headers:
+        request_headers.update(headers)
+    if auth:
+        request_headers["Authorization"] = f"Bearer {api_key()}"
+    project_id = os.environ.get("VIBECODE_PROJECT_ID")
+    if project_id:
+        request_headers["X-Project-ID"] = project_id
+    url = f"{service_url()}{path}"
+    request = urllib.request.Request(url, data=body, headers=request_headers, method=method)
+    ssl_context = ssl.create_default_context()
+    try:
+        import certifi  # type: ignore
+
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        pass
+    try:
+        with urllib.request.urlopen(request, timeout=timeout, context=ssl_context) as response:
+            data = response.read()
+            if not data:
+                return {}
+            content_type = response.headers.get("Content-Type", "")
+            if "application/json" in content_type or data[:1] in (b"{", b"["):
+                return json.loads(data.decode("utf-8"))
+            return {"raw": data.decode("utf-8")}
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(raw)
+            message = parsed.get("error") or parsed.get("message") or raw
+        except json.JSONDecodeError:
+            message = raw or exc.reason
+        code = {
+            401: "UNAUTHORIZED",
+            403: "FORBIDDEN",
+            404: "NOT_FOUND",
+        }.get(exc.code, "SERVER_ERROR" if exc.code >= 500 else "CLIENT_ERROR")
+        raise CliError(code, message) from exc
+    except urllib.error.URLError as exc:
+        raise CliError("CONNECTION_FAILED", str(exc.reason)) from exc
+
+
+def json_body(payload):
+    return json.dumps(payload).encode("utf-8")
+
+
+def logfmt_value(value):
+    if value is None:
+        return '""'
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{text}"'
+
+
+class Printer:
+    def __init__(self, output_mode, quiet):
+        self.output_mode = output_mode
+        self.quiet = quiet
+
+    def emit(self, payload, primary=None):
+        if self.quiet:
+            if primary is not None:
+                print(primary)
+                return
+            if isinstance(payload, dict):
+                for value in payload.values():
+                    if value not in (None, "", []):
+                        print(value)
+                        return
+            return
+        if self.output_mode == "json":
+            print(json.dumps(payload))
+            return
+        if isinstance(payload, dict):
+            print(" ".join(f'{key}={logfmt_value(value)}' for key, value in payload.items()))
+            return
+        print(payload)
+
+    def event(self, name, message=None):
+        if message:
+            print(f"[{name}] {message}", file=sys.stderr)
+        else:
+            print(f"[{name}]", file=sys.stderr)
+
+
+def wait_for_state(fetch_fn, pending_states, success_states, failure_states, printer, resource_name):
+    while True:
+        payload = fetch_fn()
+        state = payload.get("state")
+        if state in success_states:
+            printer.event("done", f"{resource_name} succeeded")
+            return payload
+        if state in failure_states:
+            printer.event("error", f"{resource_name} failed")
+            raise CliError("BUILD_FAILED" if resource_name == "build" else "SIGN_FAILED", payload.get("error") or "Operation failed")
+        printer.event(pending_states.get(state, "waiting"), f"{resource_name} state={state}")
+        time.sleep(3)
+
+
+def command_skill(args, printer):
+    print(SKILL_MD.read_text())
+
+
+def command_config_get(args, printer):
+    config = load_config()
+    printer.emit(config)
+
+
+def command_config_path(args, printer):
+    printer.emit({"path": str(CONFIG_PATH)}, primary=str(CONFIG_PATH))
+
+
+def command_config_set(args, printer):
+    config = load_config()
+    save_config(set_config_value(config, args.key, args.value))
+    printer.emit({"ok": True, "key": args.key, "value": args.value}, primary=args.value)
+
+
+def resolve_user_id(user_id_arg=None):
+    return user_id_arg or default_user_id()
+
+
+def command_devices(args, printer):
+    user_id = resolve_user_id(args.user_id)
+    payload = make_request("GET", f"/api/devices/{urllib.parse.quote(user_id)}")
+    payload["registrationUrl"] = f"{service_url()}/register/{user_id}"
+    printer.emit(payload, primary="\n".join(device["udid"] for device in payload.get("devices", [])))
+
+
+def command_register_apple(args, printer):
+    user_id = resolve_user_id(args.user_id)
+    payload = make_request("POST", f"/api/devices/{urllib.parse.quote(user_id)}/register-apple", body=b"{}", headers={"Content-Type": "application/json"})
+    printer.emit(payload, primary=str(payload.get("registered", [])))
+
+
+def fetch_build_job(job_id):
+    return make_request("GET", f"/api/build-jobs/{urllib.parse.quote(job_id)}")
+
+
+def fetch_signed_build(build_id):
+    return make_request("GET", f"/api/builds/{urllib.parse.quote(build_id)}")
+
+
+def command_build(args, printer):
+    zip_path = Path(args.zip_path)
+    if not zip_path.exists():
+        raise CliError("NOT_FOUND", f"Zip file not found: {zip_path}")
+    printer.event("build", f"uploading {zip_path}")
+    payload = make_request(
+        "POST",
+        "/api/build",
+        body=zip_path.read_bytes(),
+        headers={"Content-Type": "application/zip"},
+        timeout=300,
+    )
+    build_job_id = payload.get("buildJobId")
+    if not build_job_id:
+        raise CliError("UNEXPECTED_ERROR", "Missing buildJobId in response")
+    printer.event("build", f"job {build_job_id} started")
+    final_payload = wait_for_state(
+        lambda: fetch_build_job(build_job_id),
+        {"uploading": "build", "building": "building"},
+        {"built"},
+        {"failed"},
+        printer,
+        "build",
+    )
+    printer.emit(
+        {
+            "buildJobId": build_job_id,
+            "state": final_payload.get("state"),
+            "appUrl": final_payload.get("appUrl"),
+        },
+        primary=build_job_id,
+    )
+
+
+def command_build_status(args, printer):
+    payload = fetch_build_job(args.job_id)
+    printer.emit(payload, primary=payload.get("id"))
+
+
+def command_build_logs(args, printer):
+    payload = make_request("GET", f"/api/build-jobs/{urllib.parse.quote(args.job_id)}/logs")
+    if printer.output_mode == "json":
+        printer.emit(payload)
+        return
+    logs = payload.get("logs", [])
+    if not logs:
+        printer.emit({"logs": 0})
+        return
+    for entry in logs:
+        print(f'logId={logfmt_value(entry.get("id"))} lineCount={logfmt_value(entry.get("lineCount"))}')
+        print(entry.get("text", ""))
+
+
+def command_sign(args, printer):
+    user_id = resolve_user_id(args.user)
+    build_payload = fetch_build_job(args.build_job_id)
+    if build_payload.get("state") != "built":
+        raise CliError("BUILD_NOT_READY", f"Build {args.build_job_id} is not ready")
+    app_url = build_payload.get("appUrl")
+    if not app_url:
+        raise CliError("UNEXPECTED_ERROR", "Build is missing appUrl")
+    body = {"userId": user_id, "appUrl": app_url}
+    project_id = os.environ.get("VIBECODE_PROJECT_ID")
+    if project_id:
+        body["projectId"] = project_id
+    printer.event("signing", f"starting sign for build {args.build_job_id}")
+    payload = make_request("POST", "/api/sign", body=json_body(body), headers={"Content-Type": "application/json"}, timeout=120)
+    build_id = payload.get("buildId")
+    if not build_id:
+        raise CliError("UNEXPECTED_ERROR", "Missing buildId in sign response")
+    final_payload = wait_for_state(
+        lambda: fetch_signed_build(build_id),
+        {"pending": "signing", "signing": "signing"},
+        {"signed"},
+        {"failed"},
+        printer,
+        "sign",
+    )
+    printer.emit(
+        {
+            "buildId": build_id,
+            "state": final_payload.get("state"),
+            "installUrl": final_payload.get("installUrl"),
+        },
+        primary=final_payload.get("installUrl"),
+    )
+
+
+def command_sign_status(args, printer):
+    payload = fetch_signed_build(args.build_id)
+    printer.emit(payload, primary=payload.get("id"))
+
+
+def command_auth_start(args, printer):
+    payload = {
+        "username": args.username,
+        "password": args.password,
+    }
+    if args.user:
+        payload["userId"] = args.user
+    response = make_request("POST", "/api/auth/start", body=json_body(payload), headers={"Content-Type": "application/json"})
+    printer.emit(response, primary=response.get("sessionId"))
+
+
+def command_auth_apikey(args, printer):
+    p8_contents = Path(args.p8_key).read_text()
+    payload = {
+        "userId": args.user,
+        "issuerID": args.issuer_id,
+        "keyID": args.key_id,
+        "p8Key": p8_contents,
+        "teamId": args.team_id,
+    }
+    response = make_request("POST", "/api/auth/apikey", body=json_body(payload), headers={"Content-Type": "application/json"})
+    printer.emit(response, primary=response.get("userId"))
+
+
+def command_auth_status(args, printer):
+    response = make_request("GET", f"/api/auth/status/{urllib.parse.quote(args.session_id)}")
+    printer.emit(response, primary=response.get("state"))
+
+
+def command_auth_respond(args, printer):
+    payload = {"sessionId": args.session_id, "value": args.value}
+    response = make_request("POST", "/api/auth/respond", body=json_body(payload), headers={"Content-Type": "application/json"})
+    printer.emit(response, primary=response.get("ok"))
+
+
+def command_bootstrap(args, printer):
+    if not BOOTSTRAP_SCRIPT.exists():
+        raise CliError("NOT_FOUND", f"Bootstrap script not found: {BOOTSTRAP_SCRIPT}")
+    completed = subprocess.run(
+        [str(BOOTSTRAP_SCRIPT), args.app_name, args.bundle_id, args.output_dir],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise CliError("CLIENT_ERROR", completed.stderr.strip() or completed.stdout.strip() or "Bootstrap failed")
+    if printer.output_mode == "json":
+        printer.emit({"ok": True, "output": completed.stdout.strip()})
+    else:
+        print(completed.stdout, end="" if completed.stdout.endswith("\n") else "\n")
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="ios-cli")
+    parser.add_argument("--output", choices=("text", "json"), default="text")
+    parser.add_argument("--quiet", action="store_true")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    skill_parser = subparsers.add_parser("skill")
+    skill_parser.set_defaults(func=command_skill)
+
+    config_parser = subparsers.add_parser("config")
+    config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
+    config_get = config_subparsers.add_parser("get")
+    config_get.set_defaults(func=command_config_get)
+    config_path = config_subparsers.add_parser("path")
+    config_path.set_defaults(func=command_config_path)
+    config_set = config_subparsers.add_parser("set")
+    config_set.add_argument("key")
+    config_set.add_argument("value")
+    config_set.set_defaults(func=command_config_set)
+
+    auth_parser = subparsers.add_parser("auth")
+    auth_subparsers = auth_parser.add_subparsers(dest="auth_command", required=True)
+    auth_start = auth_subparsers.add_parser("start")
+    auth_start.add_argument("--username", required=True)
+    auth_start.add_argument("--password", required=True)
+    auth_start.add_argument("--user")
+    auth_start.set_defaults(func=command_auth_start)
+    auth_apikey = auth_subparsers.add_parser("apikey")
+    auth_apikey.add_argument("--user", required=True)
+    auth_apikey.add_argument("--issuer-id", required=True)
+    auth_apikey.add_argument("--key-id", required=True)
+    auth_apikey.add_argument("--p8-key", required=True)
+    auth_apikey.add_argument("--team-id", required=True)
+    auth_apikey.set_defaults(func=command_auth_apikey)
+    auth_status = auth_subparsers.add_parser("status")
+    auth_status.add_argument("session_id")
+    auth_status.set_defaults(func=command_auth_status)
+    auth_respond = auth_subparsers.add_parser("respond")
+    auth_respond.add_argument("--session", dest="session_id", required=True)
+    auth_respond.add_argument("--value", required=True)
+    auth_respond.set_defaults(func=command_auth_respond)
+
+    build_parser_cmd = subparsers.add_parser("build")
+    build_parser_cmd.add_argument("zip_path")
+    build_parser_cmd.set_defaults(func=command_build)
+
+    sign_parser = subparsers.add_parser("sign")
+    sign_parser.add_argument("build_job_id")
+    sign_parser.add_argument("--user")
+    sign_parser.set_defaults(func=command_sign)
+
+    devices_parser = subparsers.add_parser("devices")
+    devices_parser.add_argument("user_id", nargs="?")
+    devices_parser.set_defaults(func=command_devices)
+
+    register_parser = subparsers.add_parser("register-apple")
+    register_parser.add_argument("user_id", nargs="?")
+    register_parser.set_defaults(func=command_register_apple)
+
+    status_parser = subparsers.add_parser("status")
+    status_subparsers = status_parser.add_subparsers(dest="status_command", required=True)
+    build_status = status_subparsers.add_parser("build")
+    build_status.add_argument("job_id")
+    build_status.set_defaults(func=command_build_status)
+    sign_status = status_subparsers.add_parser("sign")
+    sign_status.add_argument("build_id")
+    sign_status.set_defaults(func=command_sign_status)
+
+    logs_parser = subparsers.add_parser("logs")
+    logs_parser.add_argument("job_id")
+    logs_parser.set_defaults(func=command_build_logs)
+
+    bootstrap_parser = subparsers.add_parser("bootstrap")
+    bootstrap_parser.add_argument("app_name")
+    bootstrap_parser.add_argument("bundle_id")
+    bootstrap_parser.add_argument("output_dir")
+    bootstrap_parser.set_defaults(func=command_bootstrap)
+
+    return parser
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+    printer = Printer(args.output, args.quiet)
+    try:
+        args.func(args, printer)
+    except CliError as exc:
+        if args.output == "json":
+            print(json.dumps({"error": exc.message, "code": exc.code}))
+        else:
+            print(f"ERROR: {exc.message}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
